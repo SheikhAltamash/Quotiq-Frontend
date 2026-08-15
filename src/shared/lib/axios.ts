@@ -48,6 +48,22 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Check if the request is an auth endpoint where 401 is expected on invalid credentials
+    const isAuthRoute =
+      originalRequest?.url?.includes('/auth/login') ||
+      originalRequest?.url?.includes('/auth/register') ||
+      originalRequest?.url?.includes('/auth/send-otp') ||
+      originalRequest?.url?.includes('/auth/verify-otp') ||
+      originalRequest?.url?.includes('/auth/forgot-password') ||
+      originalRequest?.url?.includes('/auth/reset-password') ||
+      originalRequest?.url?.includes('/auth/refresh-token') ||
+      originalRequest?.url?.includes('/portal/auth/login') ||
+      originalRequest?.url?.includes('/portal/auth/activate');
+
+    if (isAuthRoute) {
+      return Promise.reject(error);
+    }
+
     // Check if the response is unauthorized and the request hasn't been retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
       // If this is a client portal request or user is on a portal route
@@ -56,6 +72,14 @@ api.interceptors.response.use(
         localStorage.removeItem('clientInfo');
         if (window.location.pathname !== '/portal/login' && window.location.pathname !== '/portal/activate') {
           window.location.href = '/portal/login';
+        }
+        return Promise.reject(error);
+      }
+
+      const tokens = localStorage.getItem('qt_tokens');
+      if (!tokens) {
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/register' && window.location.pathname !== '/forgot-password') {
+          window.location.href = '/login';
         }
         return Promise.reject(error);
       }
@@ -78,10 +102,8 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const tokens = localStorage.getItem('qt_tokens');
-        if (!tokens) throw new Error('No tokens');
-
         const { refreshToken } = JSON.parse(tokens) as { refreshToken: string };
+        if (!refreshToken) throw new Error('No refresh token');
         
         // Resolve dynamic refresh URL to prevent routing issues in production
         const baseURL = import.meta.env.VITE_API_URL || '/api';
@@ -105,13 +127,10 @@ api.interceptors.response.use(
         processQueue(err, null);
         isRefreshing = false;
 
-        if (window.location.pathname.startsWith('/portal')) {
-          localStorage.removeItem('clientToken');
-          localStorage.removeItem('clientInfo');
-          window.location.href = '/portal/login';
-        } else {
-          localStorage.removeItem('qt_tokens');
-          localStorage.removeItem('qt_user');
+        localStorage.removeItem('qt_tokens');
+        localStorage.removeItem('qt_user');
+
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/register' && window.location.pathname !== '/forgot-password') {
           window.location.href = '/login';
         }
         return Promise.reject(error);
