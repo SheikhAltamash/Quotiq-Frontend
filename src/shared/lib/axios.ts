@@ -9,8 +9,16 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Request interceptor: attach auth token
+// Request interceptor: attach auth token (clientToken for portal, qt_tokens for admin CRM)
 api.interceptors.request.use((config) => {
+  if (config.url?.includes('/v1/portal') || window.location.pathname.startsWith('/portal')) {
+    const clientToken = localStorage.getItem('clientToken');
+    if (clientToken) {
+      config.headers.Authorization = `Bearer ${clientToken}`;
+      return config;
+    }
+  }
+
   const tokens = localStorage.getItem('qt_tokens');
   if (tokens) {
     const { accessToken } = JSON.parse(tokens) as { accessToken: string };
@@ -42,6 +50,16 @@ api.interceptors.response.use(
 
     // Check if the response is unauthorized and the request hasn't been retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // If this is a client portal request or user is on a portal route
+      if (originalRequest.url?.includes('/v1/portal') || window.location.pathname.startsWith('/portal')) {
+        localStorage.removeItem('clientToken');
+        localStorage.removeItem('clientInfo');
+        if (window.location.pathname !== '/portal/login' && window.location.pathname !== '/portal/activate') {
+          window.location.href = '/portal/login';
+        }
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
         // Queue the request until the token is refreshed
         return new Promise((resolve, reject) => {
@@ -87,9 +105,15 @@ api.interceptors.response.use(
         processQueue(err, null);
         isRefreshing = false;
 
-        localStorage.removeItem('qt_tokens');
-        localStorage.removeItem('qt_user');
-        window.location.href = '/login';
+        if (window.location.pathname.startsWith('/portal')) {
+          localStorage.removeItem('clientToken');
+          localStorage.removeItem('clientInfo');
+          window.location.href = '/portal/login';
+        } else {
+          localStorage.removeItem('qt_tokens');
+          localStorage.removeItem('qt_user');
+          window.location.href = '/login';
+        }
         return Promise.reject(error);
       }
     }

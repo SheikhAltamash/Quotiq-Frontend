@@ -29,6 +29,8 @@ const MainLayout = lazy(() => import('@/shared/components/layout/MainLayout'));
 const FinanceDashboardPage = lazy(() => import('@/features/finance/pages/FinanceDashboardPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
+const ClientLoginPage = lazy(() => import('@/features/portal/pages/ClientLoginPage'));
+const ClientWorkspacePage = lazy(() => import('@/features/portal/pages/ClientWorkspacePage'));
 
 /** Full-screen loading spinner */
 function PageLoader() {
@@ -82,6 +84,12 @@ export function AppRoutes() {
         <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
         <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
+
+        {/* Client Portal dedicated routes */}
+        <Route path="/portal" element={<Navigate to="/portal/login" replace />} />
+        <Route path="/portal/login" element={<ClientLoginPage />} />
+        <Route path="/portal/activate" element={<ClientLoginPage />} />
+        <Route path="/portal/workspace" element={<ClientWorkspacePage />} />
 
         {/* Conditional root route */}
         <Route path="/" element={<HomeRoute />}>

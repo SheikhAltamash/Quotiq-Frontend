@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Modal from '@/shared/components/ui/Modal';
+import CustomerPortalTab from '../components/CustomerPortalTab';
+import CustomerDocumentsTab from '../components/CustomerDocumentsTab';
 
 interface Address {
   type: 'billing' | 'shipping';
@@ -60,6 +62,9 @@ interface Customer {
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'portal'>('overview');
 
   // Modal forms
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -567,9 +572,58 @@ export default function CustomerDetailPage() {
               </Link>
             </div>
           </div>
+
+          {/* Customer Module Navigation Tabs */}
+          <div className="mt-6 border-b border-outline-variant">
+            <nav className="flex gap-8 -mb-px overflow-x-auto">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`pb-3 font-label-md text-[14px] transition-colors whitespace-nowrap border-b-2 font-bold ${
+                  activeTab === 'overview'
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-secondary hover:text-on-surface'
+                }`}
+              >
+                Overview & Billing
+              </button>
+              <button
+                onClick={() => setActiveTab('documents')}
+                className={`pb-3 font-label-md text-[14px] transition-colors whitespace-nowrap border-b-2 font-bold ${
+                  activeTab === 'documents'
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-secondary hover:text-on-surface'
+                }`}
+              >
+                Documents & Client Files
+              </button>
+              <button
+                onClick={() => setActiveTab('portal')}
+                className={`pb-3 font-label-md text-[14px] transition-colors whitespace-nowrap border-b-2 font-bold ${
+                  activeTab === 'portal'
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-secondary hover:text-on-surface'
+                }`}
+              >
+                Portal Settings & Client Workspace
+              </button>
+            </nav>
+          </div>
         </section>
 
-        {/* Stats Overview Grid */}
+        {activeTab === 'portal' ? (
+          <CustomerPortalTab
+            customerId={customer.id}
+            customerName={customer.name}
+            customerCompany={customer.company}
+          />
+        ) : activeTab === 'documents' ? (
+          <CustomerDocumentsTab
+            customerId={customer.id}
+            customerName={customer.name}
+          />
+        ) : (
+          <>
+            {/* Stats Overview Grid */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-lg">
           <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-md shadow-sm">
             <p className="font-label-uppercase text-secondary mb-1">Outstanding Balance</p>
@@ -776,6 +830,8 @@ export default function CustomerDetailPage() {
             </section>
           </div>
         </div>
+        </>
+      )}
 
       </div>
 
