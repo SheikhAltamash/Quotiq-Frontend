@@ -1,20 +1,22 @@
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/shared/lib/axios';
-import Button from '@/shared/components/ui/Button';
 import {
   ArrowLeft,
+  Printer,
   Download,
   Loader2,
   Mail,
   Phone,
   Globe,
   MapPin,
-  Building,
+  Building2,
   Calendar,
-  Briefcase
+  Briefcase,
+  User,
+  Edit3
 } from 'lucide-react';
-import { useEffect } from 'react';
 
 interface OrgAddress {
   street?: string;
@@ -31,6 +33,7 @@ interface Organization {
   phone: string | null;
   website: string | null;
   address: OrgAddress | null;
+  currency: string;
 }
 
 interface OfferLetter {
@@ -44,12 +47,68 @@ interface OfferLetter {
   department: 'technical' | 'social_media';
   jobType: 'full_time' | 'internship' | 'freelance';
   workplaceType: 'remote' | 'onsite' | 'hybrid';
-  salaryPerMonth: string;
+  salaryPerMonth: string | number;
   joiningDate: string;
   status: 'draft' | 'sent' | 'accepted' | 'declined';
   notes: string | null;
   letterContent: string;
   createdAt: string;
+}
+
+// Helper to format currency in Indian Rupees
+function formatINR(val: string | number): string {
+  const num = Number(val) || 0;
+  return `₹ ${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Helper to format organization and candidate addresses cleanly on a single wide line
+function formatAddress(addr: any): string {
+  if (!addr) return '';
+  
+  if (typeof addr === 'string') {
+    try {
+      const parsed = JSON.parse(addr);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return formatAddress(parsed);
+      }
+    } catch {
+      // Plain string
+    }
+    return addr
+      .replace(/[\r\n]+/g, ', ')
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  if (typeof addr === 'object' && addr !== null) {
+    const rawParts: string[] = [];
+    const fields = [addr.street, addr.city, addr.state, addr.zipCode, addr.country];
+    for (const f of fields) {
+      if (f) {
+        const cleaned = String(f)
+          .replace(/[\r\n]+/g, ', ')
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+        rawParts.push(...cleaned);
+      }
+    }
+
+    // Deduplicate any repeated consecutive terms
+    const result: string[] = [];
+    for (const part of rawParts) {
+      const last = result[result.length - 1];
+      if (!last || last.toLowerCase() !== part.toLowerCase()) {
+        result.push(part);
+      }
+    }
+
+    return result.join(', ');
+  }
+
+  return String(addr).replace(/[\r\n]+/g, ', ').trim();
 }
 
 export default function OfferDetailPage() {
@@ -82,7 +141,7 @@ export default function OfferDetailPage() {
     if (offer && org && isPrintMode) {
       timer = setTimeout(() => {
         window.print();
-      }, 1000);
+      }, 500);
     }
     return () => {
       if (timer) clearTimeout(timer);
@@ -91,179 +150,125 @@ export default function OfferDetailPage() {
 
   if (isOfferLoading || isOrgLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     );
   }
 
   if (!offer) {
     return (
-      <div className="text-center py-20">
-        <h3 className="text-sm font-bold text-on-surface">Offer Letter not found</h3>
-        <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate('/offers')}>
-          Back to List
-        </Button>
+      <div className="py-12 text-center space-y-4">
+        <p className="text-on-surface-variant font-bold">Offer letter details not found.</p>
+        <button onClick={() => navigate('/offers')} className="text-primary hover:underline font-semibold">
+          Go back to list
+        </button>
       </div>
     );
   }
 
-  const creationDate = new Date(offer.createdAt).toLocaleDateString('en-IN', {
+  const creationDate = new Date(offer.createdAt).toLocaleDateString('en-GB', {
     day: '2-digit',
-    month: 'long',
+    month: 'short',
     year: 'numeric'
   });
 
-  const joiningDateFormatted = new Date(offer.joiningDate).toLocaleDateString('en-IN', {
+  const joiningDateFormatted = new Date(offer.joiningDate).toLocaleDateString('en-GB', {
     day: '2-digit',
-    month: 'long',
+    month: 'short',
     year: 'numeric'
   });
 
-  // Address line construction helper
-  const renderOrgAddress = () => {
-    if (!org?.address) return 'Sadar Azad Chowk, Nagpur, Maharashtra, India';
-    const { street, city, state, zipCode, country } = org.address;
-    return [street, city, state, zipCode, country].filter(Boolean).join(', ');
+  const orgAddressStr = formatAddress(org?.address);
+  const candidateAddressStr = formatAddress(offer.candidateAddress);
+
+  const getStatusBadge = (status: OfferLetter['status']) => {
+    switch (status) {
+      case 'accepted':
+        return <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">Accepted</span>;
+      case 'sent':
+        return <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">Sent</span>;
+      case 'declined':
+        return <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">Declined</span>;
+      default:
+        return <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-300">Draft</span>;
+    }
   };
 
   return (
-    <div className="max-w-[210mm] mx-auto space-y-6 pb-12">
-      {/* Print Style Injections */}
+    <div className="space-y-6 max-w-4xl mx-auto pb-12">
+      {/* Global & Print CSS Styles */}
       <style>{`
-        /* =====================================================
-           SCREEN STYLES: Fixed A4 page preview boxes
-           ===================================================== */
+        @page {
+          size: A4 portrait;
+          margin: 12mm 10mm 12mm 10mm;
+        }
+
         @media screen {
-          .contract-body {
+          .a4-sheet {
             width: 210mm;
-            height: 297mm;
-            overflow: hidden;
-            padding: 40px !important;
-            background-image: url(/back.png) !important;
-            background-size: 100% 100% !important;
-            background-repeat: no-repeat !important;
-            background-position: center !important;
-            background-color: white;
+            min-height: 297mm;
+            background: #ffffff;
+            color: #0f172a;
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
+            border-radius: 4px;
             box-sizing: border-box;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.13);
-          }
-          
-          .contract-body p, .contract-body li {
-            font-family: "Times New Roman", Times, serif;
-            line-height: 1.6;
-            color: #333333;
+            margin: 0 auto;
+            padding: 36px 40px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           }
         }
 
-        /* =====================================================
-           PRINT STYLES: Flowing document with tiling background
-           ===================================================== */
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-
-          /* Hide sidebar, header, buttons, chatbots, iframes */
-          body > :not(#root),
-          aside, header, nav,
-          .print\\:hidden, button,
-          .chat-widget,
-          [class*="chat"], [id*="chat"],
-          [class*="floating"],
-          iframe {
-            display: none !important;
-            visibility: hidden !important;
-          }
-
-          /* Flatten all layout wrappers */
-          html, body, #root {
-            display: block !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-            max-width: none !important;
-            height: auto !important;
-            min-height: 0 !important;
-            border: none !important;
-            background: transparent !important;
-            box-shadow: none !important;
-          }
-
-          /* Sidebar padding killer */
-          main,
-          .min-h-screen,
-          .flex-col,
-          .space-y-6,
-          .max-w-\\[210mm\\],
-          .mx-auto,
-          .flex,
-          [class*="layout"],
-          div[style*="paddingLeft"],
-          div[style*="padding-left"] {
-            display: block !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            max-width: none !important;
-            width: 100% !important;
-            height: auto !important;
-            min-height: 0 !important;
-            border: none !important;
-            box-shadow: none !important;
-            background: transparent !important;
-          }
-
-          /* Kill Tailwind space-y-* child gap */
-          [class*="space-y-"] > * {
-            margin-top: 0 !important;
-            margin-bottom: 0 !important;
-          }
-
-          /* Remove any page-level padding that pushes content down */
-          [class*="pb-"], [class*="pt-"], [class*="py-"] {
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-          }
-
-          body {
-            background: white !important;
-            color: #1a1a1a !important;
-            font-family: "Times New Roman", Times, serif !important;
-          }
-
-          /* The print document root: 210mm wide, background tiles every 297mm */
-          .print-doc-root {
-            display: block !important;
+          html, body {
             width: 210mm !important;
+            height: auto !important;
             margin: 0 !important;
-            margin-top: 0 !important;
             padding: 0 !important;
-            position: relative !important;
-            top: 0 !important;
-            background-image: url(/back.png) !important;
-            background-size: 210mm 297mm !important;
-            background-repeat: repeat-y !important;
-            background-position: top left !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            box-sizing: border-box !important;
           }
 
-          /* Each section becomes a transparent flowing block with 40px padding */
-          .print-doc-root .contract-body {
-            display: block !important;
-            width: auto !important;
-            height: auto !important;
-            min-height: 0 !important;
-            overflow: visible !important;
-            background: none !important;
-            border: none !important;
-            box-shadow: none !important;
+          /* Hide all application chrome */
+          header, nav, aside,
+          .no-print, button,
+          .chat-widget, [class*="chat"],
+          [class*="floating"], iframe {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
             margin: 0 !important;
-            padding: 40px !important;
-            box-sizing: border-box !important;
+            padding: 0 !important;
+          }
+
+          /* Reset layout containers */
+          #root, #root > div, main, main > div,
+          .min-h-screen, .space-y-6, .max-w-4xl, .mx-auto {
+            display: block !important;
+            position: static !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: none !important;
+            width: 100% !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+
+          .a4-sheet {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            min-height: 0 !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
           }
 
           .print-avoid-break {
@@ -274,163 +279,189 @@ export default function OfferDetailPage() {
       `}</style>
 
       {/* Action Bar (hidden in Print Mode) */}
-      <div className="flex items-center justify-between border-b border-slate-200 pb-4 print:hidden">
-        <div className="flex items-center gap-xs">
+      <div className="no-print flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
+        <button
+          onClick={() => navigate('/offers')}
+          className="flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors font-semibold text-sm cursor-pointer"
+        >
+          <ArrowLeft size={16} />
+          <span>Back to Offer Letters</span>
+        </button>
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/offers')}
-            className="text-secondary hover:text-primary flex items-center gap-1.5 text-body-sm font-semibold transition-colors cursor-pointer"
-          >
-            <ArrowLeft size={16} /> Back to Offer Letters
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
             onClick={() => navigate(`/offers/new?id=${offer.id}`)}
-            className="h-10 cursor-pointer"
+            className="px-3.5 h-10 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium text-sm rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
           >
-            Edit Offer
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<Download size={14} />}
+            <Edit3 size={15} />
+            <span>Edit Offer</span>
+          </button>
+          <button
             onClick={() => window.print()}
-            className="h-10 cursor-pointer"
+            className="px-4 h-10 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg shadow-sm transition-all flex items-center gap-2 cursor-pointer"
           >
-            Print / Save PDF
-          </Button>
+            <Printer size={16} />
+            <span>Download PDF / Print</span>
+          </button>
         </div>
       </div>
 
-      <div className="flex flex-col items-center print-doc-root">
-        <div className="contract-body bg-white border border-slate-200 rounded-xl shadow-sm text-slate-800 font-serif leading-relaxed text-xs">
-        
-        {/* Top Centered Corporate Logo */}
-        <div className="flex flex-col items-center justify-center border-b-2 border-primary/20 pb-6 mb-8">
-          <img src="/nobglogo.png" alt="Devronic Logo" className="h-12 object-contain mb-2" />
-          <h1 className="text-base font-bold font-sans tracking-wide uppercase text-primary">
-            {org?.name || 'Devronic Solutions'}
-          </h1>
-          <p className="text-[10px] text-slate-500 font-sans tracking-wider mt-0.5">
-            {org?.website || 'www.devronic.org'} | {org?.email || 'devronic.org@gmail.com'}
-          </p>
-        </div>
+      {/* CLEAN A4 OFFER LETTER SHEET */}
+      <div className="a4-sheet">
 
-        {/* Letter Metadata */}
-        <div className="flex justify-between items-start mb-6 font-sans">
-          <div>
-            <p className="text-[10px] uppercase font-bold text-slate-400">Offer Reference</p>
-            <p className="font-bold text-primary font-mono text-xs">{offer.offerNumber}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] uppercase font-bold text-slate-400">Date of Issue</p>
-            <p className="font-semibold text-xs">{creationDate}</p>
-          </div>
-        </div>
-
-        {/* Sender & Recipient addresses */}
-        <div className="grid grid-cols-2 gap-8 mb-8 font-sans">
-          <div className="space-y-1">
-            <p className="text-[9px] uppercase font-bold text-primary tracking-wide border-b border-primary/10 pb-0.5 mb-1.5">
-              ISSUED BY
-            </p>
-            <p className="font-bold text-xs text-slate-900">{org?.name || 'Devronic Solutions'}</p>
-            <div className="text-[11px] text-slate-600 space-y-0.5">
-              <p className="flex items-start gap-1">
-                <MapPin size={10} className="text-slate-400 mt-0.5 shrink-0" />
-                <span>{renderOrgAddress()}</span>
-              </p>
-              {org?.email && (
-                <p className="flex items-center gap-1">
-                  <Mail size={10} className="text-slate-400 shrink-0" />
-                  <span>{org.email}</span>
+        {/* ─── 1. TOP HEADER: BRANDING & OFFER META ─── */}
+        <div className="flex items-start justify-between gap-6 pb-6 border-b border-slate-200">
+          {/* Brand Left */}
+          <div className="flex items-start gap-3.5 flex-1 min-w-0 pr-6">
+            {/* Clean Quotiq SVG Logo */}
+            <div className="shrink-0 mt-0.5">
+              <svg width="42" height="42" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="8" fill="#2563eb" />
+                <circle cx="16" cy="16" r="9" stroke="white" strokeWidth="2.2" fill="none" />
+                <circle cx="16" cy="16" r="3.5" fill="white" />
+                <line x1="22.5" y1="22.5" x2="27" y2="27" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-tight">
+                {org?.name || 'Quotiq Technologies'}
+              </h1>
+              {orgAddressStr && (
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed w-full">
+                  {orgAddressStr}
                 </p>
               )}
-              {org?.phone && (
-                <p className="flex items-center gap-1">
-                  <Phone size={10} className="text-slate-400 shrink-0" />
-                  <span>{org.phone}</span>
-                </p>
-              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1.5 font-medium">
+                {org?.phone && (
+                  <span className="flex items-center gap-1">
+                    <strong className="text-slate-700">Tel:</strong> {org.phone}
+                  </span>
+                )}
+                {org?.phone && org?.email && <span className="text-slate-300">•</span>}
+                {org?.email && (
+                  <span className="flex items-center gap-1">
+                    <strong className="text-slate-700">Email:</strong> {org.email}
+                  </span>
+                )}
+                {org?.email && org?.website && <span className="text-slate-300">•</span>}
+                {org?.website && (
+                  <span className="flex items-center gap-1">
+                    <strong className="text-slate-700">Web:</strong> {org.website}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="space-y-1">
-            <p className="text-[9px] uppercase font-bold text-primary tracking-wide border-b border-primary/10 pb-0.5 mb-1.5">
-              PROFFERED TO
-            </p>
-            <p className="font-bold text-xs text-slate-900">{offer.candidateName}</p>
-            <div className="text-[11px] text-slate-600 space-y-0.5">
-              <p className="flex items-start gap-1">
-                <MapPin size={10} className="text-slate-400 mt-0.5 shrink-0" />
-                <span className="whitespace-pre-wrap">{offer.candidateAddress}</span>
-              </p>
-              <p className="flex items-center gap-1">
-                <Mail size={10} className="text-slate-400 shrink-0" />
-                <span>{offer.candidateEmail}</span>
-              </p>
-              {offer.candidatePhone && (
-                <p className="flex items-center gap-1">
-                  <Phone size={10} className="text-slate-400 shrink-0" />
-                  <span>{offer.candidatePhone}</span>
-                </p>
-              )}
+          {/* Offer Meta Right */}
+          <div className="text-right shrink-0">
+            <div className="mb-1">
+              {getStatusBadge(offer.status)}
+            </div>
+            <div className="text-lg font-extrabold text-slate-900 mt-1 tracking-tight font-mono">
+              #{offer.offerNumber}
+            </div>
+            <div className="text-xs text-slate-600 mt-1.5 space-y-0.5 font-medium">
+              <div><strong>Issue Date:</strong> {creationDate}</div>
+              <div><strong>Joining Date:</strong> {joiningDateFormatted}</div>
             </div>
           </div>
         </div>
 
-        {/* Subject Header */}
-        <div className="bg-slate-50 border-y border-slate-200/80 py-2.5 px-4 mb-6 text-center font-sans">
-          <p className="text-[11px] font-bold text-slate-800 uppercase tracking-wide">
-            Subject: Offer of Employment as {offer.jobTitle}
+        {/* ─── 2. ISSUER & CANDIDATE DETAILS ─── */}
+        <div className="grid grid-cols-2 gap-6 py-5 border-b border-slate-200 text-xs">
+          {/* Issuer details */}
+          <div className="bg-slate-50/70 p-3.5 rounded-lg border border-slate-200/80">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+              Issued By
+            </span>
+            <div className="text-sm font-bold text-slate-900">{org?.name || 'Quotiq Technologies'}</div>
+            <div className="text-slate-600 mt-1 space-y-0.5 leading-relaxed">
+              {orgAddressStr && <p>{orgAddressStr}</p>}
+              {org?.email && <p>Email: {org.email}</p>}
+              {org?.phone && <p>Phone: {org.phone}</p>}
+            </div>
+          </div>
+
+          {/* Candidate details */}
+          <div className="bg-slate-50/70 p-3.5 rounded-lg border border-slate-200/80">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+              Proffered To
+            </span>
+            <div className="text-sm font-bold text-slate-900">{offer.candidateName}</div>
+            <div className="text-slate-600 mt-1 space-y-0.5 leading-relaxed">
+              {candidateAddressStr && <p>Address: {candidateAddressStr}</p>}
+              <p>Email: {offer.candidateEmail}</p>
+              {offer.candidatePhone && <p>Phone: {offer.candidatePhone}</p>}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── 3. POSITION & ENGAGEMENT SUMMARY ─── */}
+        <div className="grid grid-cols-3 gap-3 py-4 border-b border-slate-200 text-xs">
+          <div className="bg-slate-50 p-2.5 rounded border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase block">Position</span>
+            <span className="text-xs font-bold text-slate-900 mt-0.5 block">{offer.jobTitle}</span>
+          </div>
+          <div className="bg-slate-50 p-2.5 rounded border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase block">Engagement</span>
+            <span className="text-xs font-bold text-slate-900 mt-0.5 capitalize block">
+              {offer.jobType.replace('_', ' ')} • {offer.workplaceType}
+            </span>
+          </div>
+          <div className="bg-slate-50 p-2.5 rounded border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase block">Remuneration</span>
+            <span className="text-xs font-bold text-blue-700 mt-0.5 block">
+              {formatINR(offer.salaryPerMonth)} / month
+            </span>
+          </div>
+        </div>
+
+        {/* ─── 4. SUBJECT LINE ─── */}
+        <div className="bg-slate-50 border border-slate-200/90 py-2.5 px-4 my-5 rounded text-center">
+          <p className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+            Subject: Official Offer of Employment — {offer.jobTitle}
           </p>
         </div>
 
-        {/* Offer Letter Matter Content */}
-        <div className="whitespace-pre-wrap text-[12px] leading-relaxed mb-10 text-slate-800 font-serif pr-4">
+        {/* ─── 5. LETTER CONTENT ─── */}
+        <div className="whitespace-pre-wrap text-xs text-slate-800 leading-relaxed font-sans mb-8">
           {offer.letterContent}
         </div>
 
-        {/* Acceptance Signatures Block */}
-        <div className="border-t border-slate-200/80 pt-8 mt-12 font-sans print:avoid-break-inside">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-900 text-center mb-6">
-            Acceptance & Signatures
-          </h3>
-          
-          <div className="grid grid-cols-2 gap-12">
-            <div className="space-y-4">
-              <p className="text-xs font-bold text-slate-800">For Devronic Solutions</p>
-              <div className="h-14 border-b border-slate-200 flex items-end">
-                <span className="text-[9px] text-slate-400 italic pb-1">Signature & Company Seal</span>
-              </div>
-              <div className="text-[11px] text-slate-600 space-y-0.5">
-                <p>Name: <span className="font-semibold text-slate-900">Sheikh Altamash</span></p>
-                <p>Designation: <span className="font-semibold text-slate-900">Director</span></p>
-                <p>Date: <span className="font-semibold text-slate-900">{creationDate}</span></p>
-              </div>
+        {/* ─── 6. ACCEPTANCE & SIGNATURES ─── */}
+        <div className="pt-6 border-t border-slate-200 grid grid-cols-2 gap-10 text-xs print-avoid-break">
+          {/* Organization Signatory */}
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+              Authorized Signatory
+            </span>
+            <div className="font-bold text-slate-900">{org?.name || 'Quotiq Technologies'}</div>
+            <div className="h-14 border-b border-slate-300 flex items-end pb-1">
+              <span className="text-[11px] text-slate-400 italic">Signature &amp; Company Seal</span>
             </div>
+            <div className="text-[11px] text-slate-500 mt-1">Date: {creationDate}</div>
+          </div>
 
-            <div className="space-y-4">
-              <p className="text-xs font-bold text-slate-800">For Candidate ({offer.candidateName})</p>
-              <div className="h-14 border-b border-slate-200 flex items-end">
-                <span className="text-[9px] text-slate-400 italic pb-1">Candidate Signature Acceptance</span>
-              </div>
-              <div className="text-[11px] text-slate-600 space-y-0.5">
-                <p>Name: <span className="font-semibold text-slate-900">{offer.candidateName}</span></p>
-                <p>Signature Date: <span className="font-semibold text-slate-900">___________________</span></p>
-                <p>Joining Target Date: <span className="font-semibold text-slate-900">{joiningDateFormatted}</span></p>
-              </div>
+          {/* Candidate Acceptance */}
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+              Candidate Acceptance
+            </span>
+            <div className="font-bold text-slate-900">{offer.candidateName}</div>
+            <div className="h-14 border-b border-slate-300 flex items-end pb-1">
+              <span className="text-[11px] text-slate-400 italic">Signature &amp; Acceptance Date</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Target Joining Date: <strong className="text-slate-700">{joiningDateFormatted}</strong>
             </div>
           </div>
         </div>
 
-        {/* Document Footer */}
-        <div className="text-center text-[9px] text-slate-400 border-t border-slate-100 pt-8 mt-12 font-sans">
-          This is a system-generated corporate document issued under Devronic Solutions guidelines.
+        {/* ─── 7. FOOTER ─── */}
+        <div className="text-center text-[10px] text-slate-400 border-t border-slate-100 pt-6 mt-8">
+          This is an official employment offer document issued by {org?.name || 'Quotiq Technologies'}.
         </div>
-      </div>
+
       </div>
     </div>
   );

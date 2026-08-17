@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/shared/lib/axios';
-import Card from '@/shared/components/ui/Card';
 import { 
   ArrowLeft, 
   Printer, 
@@ -12,7 +11,11 @@ import {
   Clock,
   Phone,
   Mail,
-  Globe
+  Globe,
+  FileText,
+  CheckCircle2,
+  Building2,
+  CreditCard
 } from 'lucide-react';
 
 interface QuotationItem {
@@ -20,9 +23,9 @@ interface QuotationItem {
   description: string;
   quantity: number;
   unit: string;
-  unitPrice: string;
-  discount: string;
-  tax: string;
+  unitPrice: string | number;
+  discount: string | number;
+  tax: string | number;
 }
 
 interface QuotationSection {
@@ -53,10 +56,10 @@ interface Quotation {
   description: string | null;
   status: string;
   currency: string;
-  subtotal: string;
-  discountTotal: string;
-  taxTotal: string;
-  grandTotal: string;
+  subtotal: string | number;
+  discountTotal: string | number;
+  taxTotal: string | number;
+  grandTotal: string | number;
   validUntil: string | null;
   paymentTerms: string | null;
   termsAndConditions: string | null;
@@ -67,8 +70,32 @@ interface Quotation {
   sections: QuotationSection[];
 }
 
-// Helper to convert numbers to words in Indian/Western styles
-function numberToWords(num: number, currency: string = 'INR'): string {
+interface OrgAddress {
+  street?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+}
+
+interface Organization {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  address: OrgAddress | null;
+  currency: string;
+}
+
+// Helper to format currency in Indian Rupees
+function formatINR(val: string | number): string {
+  const num = Number(val) || 0;
+  return `₹ ${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Helper to convert numbers to words in Indian Rupees style
+function numberToWords(num: number): string {
   const a = [
     '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
     'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'
@@ -84,17 +111,59 @@ function numberToWords(num: number, currency: string = 'INR'): string {
     return numToWordsIndian(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + numToWordsIndian(n % 10000000) : '');
   };
 
-  const numToWordsWestern = (n: number): string => {
-    if (n < 20) return a[n] || '';
-    if (n < 100) return (b[Math.floor(n / 10)] || '') + (n % 10 ? ' ' + (a[n % 10] || '') : '');
-    if (n < 1000) return (a[Math.floor(n / 100)] || '') + ' Hundred' + (n % 100 ? ' and ' + numToWordsWestern(n % 100) : '');
-    if (n < 1000000) return numToWordsWestern(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWordsWestern(n % 1000) : '');
-    return numToWordsWestern(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWordsWestern(n % 1000000) : '');
-  };
+  if (num === 0) return 'Zero Rupees Only';
+  const val = Math.floor(Math.abs(num));
+  return numToWordsIndian(val) + ' Rupees Only';
+}
 
-  if (num === 0) return 'Zero';
-  const val = Math.floor(num);
-  return (currency === 'INR' ? numToWordsIndian(val) : numToWordsWestern(val)) + ' Only';
+// Helper to format organization and customer addresses cleanly on a single wide line
+function formatAddress(addr: any): string {
+  if (!addr) return '';
+  
+  if (typeof addr === 'string') {
+    try {
+      const parsed = JSON.parse(addr);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return formatAddress(parsed);
+      }
+    } catch {
+      // Plain string
+    }
+    return addr
+      .replace(/[\r\n]+/g, ', ')
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  if (typeof addr === 'object' && addr !== null) {
+    const rawParts: string[] = [];
+    const fields = [addr.street, addr.city, addr.state, addr.zipCode, addr.country];
+    for (const f of fields) {
+      if (f) {
+        const cleaned = String(f)
+          .replace(/[\r\n]+/g, ', ')
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+        rawParts.push(...cleaned);
+      }
+    }
+
+    // Deduplicate any repeated consecutive terms
+    const result: string[] = [];
+    for (const part of rawParts) {
+      const last = result[result.length - 1];
+      if (!last || last.toLowerCase() !== part.toLowerCase()) {
+        result.push(part);
+      }
+    }
+
+    return result.join(', ');
+  }
+
+  return String(addr).replace(/[\r\n]+/g, ', ').trim();
 }
 
 export default function QuotationDetailPage() {
@@ -111,6 +180,15 @@ export default function QuotationDetailPage() {
       return data.data;
     },
     enabled: !!id,
+  });
+
+  // Fetch Organization settings for clean dynamic branding
+  const { data: org } = useQuery<Organization>({
+    queryKey: ['organization'],
+    queryFn: async () => {
+      const { data } = await api.get('/v1/organization');
+      return data.data;
+    },
   });
 
   useEffect(() => {
@@ -137,7 +215,7 @@ export default function QuotationDetailPage() {
     return (
       <div className="py-12 text-center space-y-4">
         <p className="text-on-surface-variant font-bold">Failed to load quotation details.</p>
-        <button onClick={() => navigate('/quotations')} className="text-primary hover:underline">
+        <button onClick={() => navigate('/quotations')} className="text-primary hover:underline font-semibold">
           Go back to list
         </button>
       </div>
@@ -146,9 +224,10 @@ export default function QuotationDetailPage() {
 
   // Parse contact person and billing address from notes
   const notesParts = quotation.notes ? quotation.notes.split(' | ') : [];
-  const duration = notesParts[0] || '12 Weeks';
+  const duration = notesParts[0] || '';
   const contactPerson = notesParts[1]?.replace('Contact: ', '') || '';
-  const billingAddress = notesParts[2]?.replace('Address: ', '') || quotation.customer.address || '';
+  const rawBillingAddress = notesParts[2]?.replace('Address: ', '') || quotation.customer?.address || '';
+  const billingAddress = formatAddress(rawBillingAddress);
 
   const handlePrint = () => {
     window.print();
@@ -156,572 +235,548 @@ export default function QuotationDetailPage() {
 
   // Date Formatting for template
   const rawDate = new Date(quotation.createdAt);
-  const executionDate = rawDate.toLocaleDateString('en-GB', {
+  const formattedDate = rawDate.toLocaleDateString('en-GB', {
     day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
+    month: 'short',
+    year: 'numeric',
   });
 
-  // Calculate Due Date (+4 days to match the uploaded social-media invoice screenshot)
-  const dueDateRaw = new Date(rawDate.getTime() + 4 * 24 * 60 * 60 * 1000);
-  const dueDate = dueDateRaw.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
+  // Validity Date Formatting
+  const validUntilFormatted = quotation.validUntil
+    ? new Date(quotation.validUntil).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
+    : '15 Days from Issue';
 
-  // Dynamic template routing based on department
-  const deptName = (quotation.department?.name || '').toLowerCase();
-  const isSocialMedia = deptName.includes('social') || deptName.includes('media');
+  const orgAddressStr = formatAddress(org?.address);
+
+  const currencySymbol = quotation.currency === 'INR' ? '₹' : quotation.currency === 'EUR' ? '€' : quotation.currency === 'GBP' ? '£' : '$';
 
   return (
-    <div className="space-y-lg max-w-4xl mx-auto pb-xl">
-      {/* Print Style Injections */}
+    <div className="space-y-6 max-w-4xl mx-auto pb-12">
+      {/* Global & Print CSS Styles */}
       <style>{`
-        /* =====================================================
-           GLOBAL PAGE PROPERTIES (Must be at top-level)
-           ===================================================== */
         @page {
           size: A4 portrait;
-          margin: 0;
+          margin: 12mm 10mm 12mm 10mm;
         }
 
-        /* =====================================================
-           SCREEN STYLES: Fixed A4 page preview boxes
-           ===================================================== */
         @media screen {
-          .contract-body {
+          .a4-sheet {
             width: 210mm;
-            height: 297mm;
-            overflow: hidden;
-            padding: 40px !important;
-            background-image: url(/back.png) !important;
-            background-size: 100% 100% !important;
-            background-repeat: no-repeat !important;
-            background-position: center !important;
-            background-color: white;
+            min-height: 297mm;
+            background: #ffffff;
+            color: #0f172a;
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
+            border-radius: 4px;
             box-sizing: border-box;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.13);
-          }
-          
-          .contract-body p, .contract-body li {
-            font-family: "Times New Roman", Times, serif;
-            line-height: 1.6;
-            color: #333333;
+            margin: 0 auto;
+            padding: 36px 40px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           }
         }
 
-        /* =====================================================
-           PRINT STYLES: Flowing document with tiling background
-           ===================================================== */
         @media print {
           html, body {
             width: 210mm !important;
             height: auto !important;
             margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
-          /* ── 1. Nuke header completely (sticky header is 64px tall) ── */
-          header,
-          [class*="sticky"],
-          [class*="h-16"],
-          nav,
-          aside {
+          /* Hide all application chrome */
+          header, nav, aside,
+          .no-print, button,
+          .chat-widget, [class*="chat"],
+          [class*="floating"], iframe {
             display: none !important;
             visibility: hidden !important;
             height: 0 !important;
-            min-height: 0 !important;
-            max-height: 0 !important;
-            overflow: hidden !important;
-            padding: 0 !important;
             margin: 0 !important;
+            padding: 0 !important;
           }
 
-          /* ── 2. Hide all UI chrome ── */
-          body > :not(#root),
-          .no-print, button,
-          .chat-widget,
-          [class*="chat"], [id*="chat"],
-          [class*="floating"],
-          iframe {
-            display: none !important;
-            visibility: hidden !important;
-          }
-
-          /* ── 3. Flatten and nuke positioning of all ancestors ── */
+          /* Reset containers */
           #root, #root > div, main, main > div,
-          .min-h-screen,
-          .flex-col,
-          .space-y-lg,
-          .max-w-4xl,
-          .mx-auto,
-          .flex,
-          [class*="p-layout"],
-          [class*="layout"],
-          div[style*="paddingLeft"],
-          div[style*="padding-left"],
-          div[style*="paddingTop"],
-          div[style*="padding-top"] {
+          .min-h-screen, .space-y-6, .max-w-4xl, .mx-auto {
             display: block !important;
             position: static !important;
             padding: 0 !important;
             margin: 0 !important;
             max-width: none !important;
             width: 100% !important;
-            height: auto !important;
-            min-height: 0 !important;
-            border: none !important;
-            box-shadow: none !important;
             background: transparent !important;
-            transform: none !important;
-            filter: none !important;
+            box-shadow: none !important;
+            border: none !important;
           }
 
-          /* ── 4. Kill Tailwind space-y-* child margin-top ── */
-          [class*="space-y-"] > * + * {
-            margin-top: 0 !important;
-          }
-          [class*="space-y-"] > * {
-            margin-top: 0 !important;
-            margin-bottom: 0 !important;
-          }
-
-          /* ── 5. Kill any remaining padding utility classes ── */
-          [class*="pb-"], [class*="pt-"], [class*="py-"],
-          [class*="px-"], [class*="pl-"], [class*="pr-"] {
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-          }
-
-          body {
-            background: white !important;
-            color: #1a1a1a !important;
-            font-family: "Times New Roman", Times, serif !important;
-          }
-
-          /*
-           * ── 6. THE PRINT DOCUMENT ROOT ──
-           * Positioned absolutely at top:0, left:0 relative to the body
-           * so the background image starts exactly at the physical page top/left.
-           */
-          .print-doc-root {
+          .a4-sheet {
             display: block !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 210mm !important;
+            position: static !important;
+            width: 100% !important;
+            min-height: 0 !important;
+            height: auto !important;
             margin: 0 !important;
             padding: 0 !important;
-            background-image: url(/back.png) !important;
-            background-size: 210mm 297mm !important;
-            background-repeat: repeat-y !important;
-            background-position: 0 0 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            box-sizing: border-box !important;
-          }
-
-          /*
-           * ── 7. Each contract-body: transparent flowing block ──
-           * 40px inner padding per page section.
-           */
-          .print-doc-root .contract-body {
-            display: block !important;
-            width: auto !important;
-            height: auto !important;
-            min-height: 0 !important;
-            overflow: visible !important;
-            background: none !important;
-            border: none !important;
             box-shadow: none !important;
-            margin: 0 !important;
-            padding: 40px 40px !important;
-            box-sizing: border-box !important;
-          }
-
-          /* Force each logical section to start on its own physical A4 page */
-          .print-doc-root .contract-body + .contract-body {
-            page-break-before: always !important;
-            break-before: page !important;
-          }
-
-          .table-header {
-            background-color: #f1f5f9 !important;
-            color: black !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            border: none !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
           }
 
           .print-avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
+
+          .print-break-before {
+            page-break-before: always !important;
+            break-before: page !important;
+          }
+
+          table {
+            page-break-inside: auto;
+          }
+
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          thead {
+            display: table-header-group;
+          }
+
+          tfoot {
+            display: table-footer-group;
+          }
         }
       `}</style>
 
       {/* ACTION BAR */}
-      <div className="no-print flex items-center justify-between border-b border-outline-variant pb-md mb-lg">
+      <div className="no-print flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 mb-6">
         <button 
           onClick={() => navigate('/quotations')}
-          className="flex items-center gap-xs text-secondary hover:text-primary transition-all font-semibold text-sm cursor-pointer"
+          className="flex items-center gap-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-semibold text-sm cursor-pointer"
         >
           <ArrowLeft size={16} />
-          <span>Back to List</span>
+          <span>Back to Quotations</span>
         </button>
 
-        <div className="flex gap-sm">
+        <div className="flex items-center gap-3">
           <button
             onClick={handlePrint}
-            className="px-md h-11 bg-primary text-white font-body-sm rounded-lg shadow-soft hover:bg-primary/95 transition-all flex items-center gap-xs cursor-pointer font-bold"
+            className="px-4 h-10 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg shadow-sm transition-all flex items-center gap-2 cursor-pointer"
           >
-            <Printer size={18} />
+            <Printer size={16} />
             <span>Download PDF / Print</span>
           </button>
         </div>
       </div>
 
-      {/* DOCUMENT PAGE SHEET */}
-      <div className="flex flex-col items-center print-doc-root">
-        {isSocialMedia ? (
-          /* ============================================================
-             TEMPLATE A: SOCIAL MEDIA DEPARTMENT INVOICE
-             ============================================================ */
-          <div className="print-card contract-body shadow-soft">
-            <div className="space-y-lg">
-              {/* Centered Brand Header block */}
-              <div className="text-center space-y-1">
-                <img src="/devronic.png" alt="Devronic Logo" className="h-16 mx-auto object-contain mb-2" />
-                <h1 className="text-xl font-bold uppercase tracking-wide" style={{ color: '#101010', fontFamily: 'Times New Roman' }}>
-                  DEVRONIC TECHNOLOGIES
-                </h1>
-                <p className="text-xs font-bold font-serif uppercase tracking-tight" style={{ color: '#202020' }}>
-                  SADAR AZAD CHOWK, NAGPUR-440001.
+      {/* CLEAN A4 DOCUMENT SHEET */}
+      <div className="a4-sheet">
+        
+        {/* ─── 1. TOP HEADER: BRANDING & QUOTATION META ─── */}
+        <div className="flex items-start justify-between pb-6 border-b border-slate-200">
+          {/* Brand Left */}
+          <div className="flex items-start gap-3.5 flex-1 min-w-0 pr-6">
+            {/* Clean Quotiq SVG Logo */}
+            <div className="shrink-0 mt-0.5">
+              <svg width="42" height="42" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="8" fill="#2563eb" />
+                <circle cx="16" cy="16" r="9" stroke="white" strokeWidth="2.2" fill="none" />
+                <circle cx="16" cy="16" r="3.5" fill="white" />
+                <line x1="22.5" y1="22.5" x2="27" y2="27" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-tight">
+                {org?.name || 'Quotiq Technologies'}
+              </h1>
+              {orgAddressStr && (
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed w-full">
+                  {orgAddressStr}
                 </p>
-                <div className="flex justify-center items-center gap-2 text-xs font-sans text-on-surface-variant pt-0.5">
-                  <span><strong>Phone:</strong> 8530025346, 9158441435</span>
-                  <span>â€¢</span>
-                  <span><strong>Website:</strong> <a href="https://www.devronic.com" className="underline text-blue-600">www.devronic.com</a></span>
-                </div>
-                <p className="text-xs font-sans text-on-surface-variant">
-                  <strong>Email:</strong> devronic.org@gmail.com
-                </p>
-                {/* Centered thick divider line */}
-                <div className="border-b-2 border-black mt-3 mx-auto" />
+              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1.5 font-medium">
+                {org?.phone && (
+                  <span className="flex items-center gap-1">
+                    <strong className="text-slate-700">Tel:</strong> {org.phone}
+                  </span>
+                )}
+                {org?.phone && org?.email && <span className="text-slate-300">•</span>}
+                {org?.email && (
+                  <span className="flex items-center gap-1">
+                    <strong className="text-slate-700">Email:</strong> {org.email}
+                  </span>
+                )}
+                {org?.email && org?.website && <span className="text-slate-300">•</span>}
+                {org?.website && (
+                  <span className="flex items-center gap-1">
+                    <strong className="text-slate-700">Web:</strong> {org.website}
+                  </span>
+                )}
               </div>
+            </div>
+          </div>
 
-              {/* Document details */}
-              <div className="space-y-md pt-sm">
-                <h2 className="text-sm font-bold uppercase tracking-wider" style={{ fontFamily: 'Times New Roman' }}>
-                  INVOICE
-                </h2>
+          {/* Quotation Meta Right */}
+          <div className="text-right shrink-0">
+            <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+              Quotation
+            </span>
+            <div className="text-lg font-extrabold text-slate-900 mt-1 tracking-tight">
+              #{quotation.quotationNumber}
+            </div>
+            <div className="text-xs text-slate-600 mt-1.5 space-y-0.5 font-medium">
+              <div><strong>Date:</strong> {formattedDate}</div>
+              <div><strong>Valid Until:</strong> {validUntilFormatted}</div>
+              {quotation.department?.name && (
+                <div className="text-slate-500"><strong>Dept:</strong> {quotation.department.name}</div>
+              )}
+            </div>
+          </div>
+        </div>
 
-                <div className="space-y-1 text-xs" style={{ fontFamily: 'Times New Roman' }}>
-                  <p><strong>Client:</strong> {quotation.customer?.name || 'Unknown Client'}</p>
-                  <p className="pt-2"><strong>Invoice Date:</strong> {executionDate}</p>
-                  <p><strong>Due Date:</strong> {dueDate}</p>
-                </div>
+        {/* ─── 2. CLIENT & PROJECT SUMMARY CARDS ─── */}
+        <div className="grid grid-cols-2 gap-6 py-5 border-b border-slate-200 text-xs">
+          {/* Client Info */}
+          <div className="bg-slate-50/70 p-3.5 rounded-lg border border-slate-200/80">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+              Prepared For
+            </span>
+            <div className="text-sm font-bold text-slate-900">
+              {quotation.customer?.company || quotation.customer?.name || 'Valued Client'}
+            </div>
+            {quotation.customer?.company && quotation.customer?.name && (
+              <div className="text-slate-700 font-medium mt-0.5">
+                Attn: {quotation.customer.name}
               </div>
+            )}
+            {contactPerson && contactPerson !== quotation.customer?.name && (
+              <div className="text-slate-600 mt-0.5">
+                Contact: {contactPerson}
+              </div>
+            )}
+            {quotation.customer?.email && (
+              <div className="text-slate-600 mt-0.5">
+                Email: {quotation.customer.email}
+              </div>
+            )}
+            {quotation.customer?.phone && (
+              <div className="text-slate-600 mt-0.5">
+                Phone: {quotation.customer.phone}
+              </div>
+            )}
+            {billingAddress && (
+              <div className="text-slate-500 mt-1 leading-relaxed">
+                Address: {billingAddress}
+              </div>
+            )}
+          </div>
 
-              {/* Structured double-column simple table */}
-              <table className="w-full border-collapse border border-black text-xs" style={{ fontFamily: 'Times New Roman' }}>
-                <thead>
-                  <tr className="border-b border-black bg-slate-50">
-                    <th className="py-2.5 px-md border-r border-black font-bold text-left w-[35%]">Service Description</th>
-                    <th className="py-2.5 px-md font-bold text-left"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black text-on-surface">
-                  {quotation.sections.map((sec, secIdx) => (
-                    <tr key={sec.id || secIdx} className="border-b border-black">
-                      <td className="py-3 px-md border-r border-black font-bold">{sec.name}</td>
-                      <td className="py-3 px-md space-y-1">
-                        {sec.items.map((item, itemIdx) => {
-                          const descParts = item.description.split(' - ');
-                          const title = descParts[0] || 'Deliverable';
-                          const details = descParts[1] || '';
-                          return (
-                            <div key={item.id || itemIdx}>
-                              <span>{title}</span>
-                              {details && <span className="text-on-surface-variant font-sans font-medium text-[10px]"> ({details})</span>}
-                            </div>
-                          );
-                        })}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="bg-slate-50 font-bold border-t border-black">
-                    <td className="py-2.5 px-md border-r border-black font-bold text-[11px]">TOTAL AMOUNT PAYABLE</td>
-                    <td className="py-2.5 px-md font-bold font-sans text-sm">
-                      {Number(quotation.grandTotal).toLocaleString('en-IN')}/-
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          {/* Project Info */}
+          <div className="bg-slate-50/70 p-3.5 rounded-lg border border-slate-200/80">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+              Project Details
+            </span>
+            <div className="text-sm font-bold text-slate-900">
+              {quotation.projectName || 'Project Quotation'}
+            </div>
+            {quotation.projectType && (
+              <div className="text-slate-700 font-medium mt-0.5">
+                Type: {quotation.projectType}
+              </div>
+            )}
+            {duration && (
+              <div className="text-slate-600 mt-0.5">
+                Estimated Timeline: <strong className="text-slate-800">{duration}</strong>
+              </div>
+            )}
+            <div className="text-slate-600 mt-0.5">
+              Currency: <strong className="text-slate-800">INR (₹)</strong>
+            </div>
+            <div className="text-slate-600 mt-0.5">
+              Status: <span className="capitalize font-semibold text-slate-800">{quotation.status}</span>
+            </div>
+          </div>
+        </div>
 
-              {/* Dynamic Banking details block and footer */}
-              <div className="space-y-md text-xs pt-md" style={{ fontFamily: 'Times New Roman' }}>
-                <p>Kindly process the payment using the bank details provided below:</p>
-                
-                <div className="pl-md space-y-0.5 text-on-surface-variant font-medium">
-                  <p>Account Name: Sheikh Arbab Munir Sheikh</p>
-                  <p>Bank Name: State Bank of India</p>
-                  <p>Account Number: 41463051431</p>
-                  <p>IFSC Code: SBIN0011519</p>
-                  <p>Branch: Civil Lines Nagpur</p>
+        {/* ─── 3. PROJECT OVERVIEW (If provided in editor) ─── */}
+        {quotation.description && (
+          <div className="py-4 border-b border-slate-200 print-avoid-break">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+              Project Overview &amp; Objectives
+            </h2>
+            <p className="text-xs text-slate-600 leading-relaxed text-justify">
+              {quotation.description}
+            </p>
+          </div>
+        )}
+
+        {/* ─── 4. DELIVERABLES & LINE ITEMS ─── */}
+        <div className="py-5">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3">
+            Scope of Work &amp; Quotation Items
+          </h2>
+
+          {quotation.sections && quotation.sections.length > 0 ? (
+            <div className="space-y-6">
+              {quotation.sections.map((section, secIdx) => {
+                // Parse section name and optional scope description from editor
+                const parts = section.name.split('|||');
+                const moduleName = parts[0]?.trim() || section.name;
+                const scopeText = parts[1]?.trim() || '';
+                const scopeLines = scopeText
+                  ? scopeText.split('\n').map((l: string) => l.trim()).filter(Boolean)
+                  : [];
+
+                return (
+                  <div key={section.id || secIdx} className="print-avoid-break">
+                    {/* Section Header */}
+                    <div className="bg-slate-100/90 px-3.5 py-2 rounded-t border-t border-x border-slate-300 flex items-center justify-between">
+                      <span className="font-bold text-xs text-slate-900">
+                        {secIdx + 1}. {moduleName}
+                      </span>
+                    </div>
+
+                    {/* Scope text / bullet points if added in editor */}
+                    {scopeLines.length > 0 && (
+                      <div className="bg-slate-50/50 px-3.5 py-2 border-x border-slate-300 text-[11px] text-slate-600">
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {scopeLines.map((line, li) => (
+                            <li key={li}>{line.replace(/^[•\-]\s*/, '')}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Section Items Table */}
+                    <table className="w-full border-collapse border border-slate-300 text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-300 text-slate-700 font-bold text-[11px]">
+                          <th className="py-2 px-3 text-center w-10 border-r border-slate-300">#</th>
+                          <th className="py-2 px-3 text-left border-r border-slate-300">Item / Description</th>
+                          <th className="py-2 px-3 text-center w-16 border-r border-slate-300">Qty</th>
+                          <th className="py-2 px-3 text-right w-28 border-r border-slate-300">Unit Price (₹)</th>
+                          {(Number(quotation.discountTotal) > 0 || Number(quotation.taxTotal) > 0) && (
+                            <th className="py-2 px-3 text-center w-20 border-r border-slate-300">Tax/Disc</th>
+                          )}
+                          <th className="py-2 px-3 text-right w-32">Amount (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 text-slate-800">
+                        {section.items && section.items.length > 0 ? (
+                          section.items.map((item, itemIdx) => {
+                            const qty = Number(item.quantity) || 1;
+                            const price = Number(item.unitPrice) || 0;
+                            const discPct = Number(item.discount) || 0;
+                            const taxPct = Number(item.tax) || 0;
+                            const baseTotal = qty * price;
+                            const discAmt = baseTotal * (discPct / 100);
+                            const itemTaxable = baseTotal - discAmt;
+                            const taxAmt = itemTaxable * (taxPct / 100);
+                            const lineTotal = itemTaxable + taxAmt;
+
+                            const descParts = item.description.split(' - ');
+                            const title = descParts[0] || item.description;
+                            const detail = descParts[1] || '';
+
+                            return (
+                              <tr key={item.id || itemIdx} className="hover:bg-slate-50/50">
+                                <td className="py-2.5 px-3 text-center text-slate-500 border-r border-slate-300 font-medium">
+                                  {itemIdx + 1}
+                                </td>
+                                <td className="py-2.5 px-3 border-r border-slate-300">
+                                  <div className="font-semibold text-slate-900">{title}</div>
+                                  {detail && (
+                                    <div className="text-[11px] text-slate-500 mt-0.5">{detail}</div>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-center text-slate-700 border-r border-slate-300 font-medium">
+                                  {qty} {item.unit ? <span className="text-[10px] text-slate-500">{item.unit}</span> : ''}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-medium text-slate-700 border-r border-slate-300">
+                                  {formatINR(price)}
+                                </td>
+                                {(Number(quotation.discountTotal) > 0 || Number(quotation.taxTotal) > 0) && (
+                                  <td className="py-2.5 px-3 text-center text-[10px] text-slate-500 border-r border-slate-300">
+                                    {discPct > 0 && <span className="text-amber-600 block">-{discPct}%</span>}
+                                    {taxPct > 0 && <span className="text-slate-600 block">+{taxPct}%</span>}
+                                    {discPct === 0 && taxPct === 0 && <span>—</span>}
+                                  </td>
+                                )}
+                                <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                                  {formatINR(lineTotal)}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="py-3 px-3 text-center text-slate-400 italic">
+                              No items in this section
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-6 border border-dashed border-slate-300 rounded text-slate-500 text-xs">
+              No sections or line items drafted.
+            </div>
+          )}
+        </div>
+
+        {/* ─── 5. FINANCIAL TOTALS & NUMBER IN WORDS ─── */}
+        <div className="py-4 border-t border-slate-200 print-avoid-break">
+          <div className="flex justify-between items-start gap-6">
+            {/* Amount In Words & Notes */}
+            <div className="flex-1 text-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Amount in Words (INR)
+              </span>
+              <p className="font-semibold text-slate-800 italic bg-slate-50 p-2.5 rounded border border-slate-200/80">
+                {numberToWords(Number(quotation.grandTotal) || 0)}
+              </p>
+            </div>
+
+            {/* Financial Summary Table */}
+            <div className="w-72 shrink-0 text-xs">
+              <div className="space-y-1.5 border border-slate-200 rounded p-3 bg-slate-50/60">
+                <div className="flex justify-between text-slate-600">
+                  <span>Subtotal:</span>
+                  <span className="font-semibold text-slate-800">
+                    {formatINR(quotation.subtotal)}
+                  </span>
                 </div>
 
-                <p className="pt-sm">Once the payment has been completed, kindly share the transaction reference/UTR number for our records.</p>
-                <p>Thank you for your trust and continued support. We look forward to continuing our association.</p>
-                
-                <p className="pt-xs">Best Regards,</p>
-                
-                <div className="space-y-1">
-                  <p className="font-bold">Devronic Technologies</p>
-                  <p className="flex items-center gap-xs text-[11px] font-sans">
-                    <span className="text-red-500">ðŸ“ž</span> 8530025346, 9158441435
-                  </p>
-                  <p className="flex items-center gap-xs text-[11px] font-sans">
-                    <span className="text-blue-500">âœ‰</span> devronic.org@gmail.com
-                  </p>
+                {Number(quotation.discountTotal) > 0 && (
+                  <div className="flex justify-between text-amber-700">
+                    <span>Discount:</span>
+                    <span className="font-semibold">
+                      - {formatINR(quotation.discountTotal)}
+                    </span>
+                  </div>
+                )}
+
+                {Number(quotation.taxTotal) > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Estimated Tax / GST:</span>
+                    <span className="font-semibold text-slate-800">
+                      + {formatINR(quotation.taxTotal)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="border-t border-slate-300 pt-2 mt-2 flex justify-between items-center text-sm font-extrabold text-slate-900">
+                  <span>Grand Total:</span>
+                  <span className="text-blue-700">
+                    {formatINR(quotation.grandTotal)}
+                  </span>
                 </div>
               </div>
             </div>
           </div>
-        ) : (
-          /* ============================================================
-             TEMPLATE B: TECHNICAL QUOTATION â€” SINGLE FLOWING DOCUMENT
-             ============================================================ */
-          <div className="print-card contract-body shadow-soft">
-            {/* â”€â”€ LETTERHEAD HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
-              {/* Left: logo + company name + tagline */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <img src="/nobglogo.png" alt="Devronic Logo" style={{ height: '56px', objectFit: 'contain' }} />
-                <div>
-                  <div style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '0.04em', color: '#0d1a2e', fontFamily: '"Times New Roman", Times, serif', lineHeight: 1.15 }}>
-                    DEVRONIC TECHNOLOGIES
-                  </div>
-                  <div style={{ fontSize: '10px', color: '#4a5568', fontStyle: 'italic', fontFamily: 'Georgia, serif', marginTop: '1px' }}>
-                    Develop. Design. Deploy. Disrupt
-                  </div>
-                </div>
-              </div>
-              {/* Right: QUOTATION label */}
-              <div style={{ fontSize: '22px', fontWeight: 900, letterSpacing: '0.08em', color: '#0d1a2e', fontFamily: '"Times New Roman", Times, serif', textAlign: 'right', paddingTop: '8px' }}>
-                QUOTATION
-              </div>
-            </div>
+        </div>
 
-            {/* Address line */}
-            <div style={{ fontSize: '11px', color: '#2d3748', fontFamily: 'Georgia, serif', lineHeight: 1.6, marginBottom: '4px' }}>
-              Azad Chowk, Sadar Nagpur - 440001
-            </div>
-            <div style={{ fontSize: '11px', color: '#2d3748', fontFamily: 'Georgia, serif', marginBottom: '10px' }}>
-              <strong>Email:</strong> devronic.org@gmail.com &nbsp;|&nbsp; <strong>Web:</strong> www.devronic.com
-            </div>
+        {/* ─── 6. PAYMENT TERMS & MILESTONES ─── */}
+        {quotation.paymentTerms && (
+          <div className="py-4 border-t border-slate-200 text-xs print-avoid-break">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+              Payment Terms &amp; Milestones
+            </h2>
+            <div className="grid grid-cols-3 gap-3">
+              {(() => {
+                const parts = quotation.paymentTerms.split(',').map((s: string) => s.trim()).filter(Boolean);
+                const defaultLabels = ['1. Project Advance', '2. Mid-Development Stage', '3. Final Handover & Launch'];
+                const grandTotal = Number(quotation.grandTotal) || 0;
 
-            {/* Horizontal rule */}
-            <div style={{ borderTop: '1.5px solid #1a202c', marginBottom: '14px' }} />
+                return parts.map((pctStr: string, idx: number) => {
+                  const pctNum = parseFloat(pctStr);
+                  const amount = isNaN(pctNum) ? 0 : (grandTotal * pctNum) / 100;
 
-            {/* â”€â”€ INFO GRID TABLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', fontFamily: 'Georgia, serif', marginBottom: '16px', tableLayout: 'fixed' }}>
-              <tbody>
-                <tr>
-                  <td style={{ border: '1px solid #4a5568', padding: '8px 12px', width: '50%', textAlign: 'center', verticalAlign: 'middle' }}>
-                    Prepared For: <strong>{quotation.customer?.name || 'Unknown Client'}</strong>
-                  </td>
-                  <td style={{ border: '1px solid #4a5568', padding: '8px 12px', width: '50%', textAlign: 'center', verticalAlign: 'middle' }}>
-                    Date: <strong>{executionDate}</strong>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ border: '1px solid #4a5568', padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' }}>
-                    Industry: <strong>{quotation.department?.name || 'Technology Services'}</strong>
-                  </td>
-                  <td style={{ border: '1px solid #4a5568', padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' }}>
-                    Validity: <strong>15 Days from Issue</strong>
-                  </td>
-                </tr>
-                {quotation.projectName && (
-                  <tr>
-                    <td colSpan={2} style={{ border: '1px solid #4a5568', padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' }}>
-                      Project Name: <strong>{quotation.projectName}</strong>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-
-            {/* â”€â”€ FLOWING CONTENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                All sections use page-break-inside: avoid so that
-                sentences are never cut mid-line across pages.
-            â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-            <div style={{ fontSize: '12px', fontFamily: 'Georgia, serif', color: '#1a202c', lineHeight: 1.7 }}>
-
-              {/* Project Overview */}
-              {quotation.description && (
-                <div style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '10px' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '3px' }}>Project Overview</div>
-                  <div style={{ textAlign: 'justify' }}>{quotation.description}</div>
-                </div>
-              )}
-
-              {/* Scope of Work & Deliverables */}
-              {quotation.sections && quotation.sections.length > 0 && (
-                <div style={{ marginBottom: '10px' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '6px', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-                    Scope of Work &amp; Deliverables
-                  </div>
-
-                  {quotation.sections.map((sec, secIdx) => {
-                    const parts = sec.name.split('|||');
-                    const moduleName = parts[0]?.trim() || sec.name;
-                    const scopeText = parts[1]?.trim() || '';
-                    const scopeLines = scopeText
-                      ? scopeText.split('\n').map((l: string) => l.trim()).filter(Boolean)
-                      : [];
-                    const itemFeatures = sec.items.map((it: { description: string }) => {
-                      const p = it.description.split(' - ');
-                      return { title: p[0] || '', detail: p[1] || '' };
-                    });
-
-                    return (
-                      <div key={sec.id || secIdx} style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '8px' }}>
-                        <div style={{ fontWeight: 700, marginBottom: '3px' }}>
-                          {secIdx + 1}. <strong>{moduleName}</strong>
-                        </div>
-
-                        {/* Scope lines */}
-                        {scopeLines.length > 0 && (
-                          <ul style={{ margin: '0 0 4px 0', paddingLeft: '20px', listStyleType: 'disc' }}>
-                            {scopeLines.map((line: string, li: number) => (
-                              <li key={li} style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '1px' }}>
-                                {line.replace(/^[â€¢\-]\s*/, '')}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-
-                        {/* Item features */}
-                        {itemFeatures.length > 0 && (
-                          <ul style={{ margin: '0 0 4px 0', paddingLeft: scopeLines.length > 0 ? '36px' : '20px', listStyleType: scopeLines.length > 0 ? 'circle' : 'disc' }}>
-                            {itemFeatures.map((feat: { title: string; detail: string }, fi: number) => (
-                              <li key={fi} style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '1px' }}>
-                                {feat.detail ? (
-                                  <><strong>{feat.title}</strong>: {feat.detail}</>
-                                ) : feat.title}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
+                  return (
+                    <div key={idx} className="bg-slate-50 p-2.5 rounded border border-slate-200">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block">
+                        {defaultLabels[idx] || `Milestone ${idx + 1}`}
+                      </span>
+                      <div className="text-sm font-extrabold text-slate-900 mt-0.5">
+                        {isNaN(pctNum) ? pctStr : `${pctNum}%`}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Commercials & Financial Investment */}
-              <div style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '10px' }}>
-                <div style={{ fontWeight: 700, marginBottom: '4px' }}>Commercials &amp; Financial Investment</div>
-                <ul style={{ margin: 0, paddingLeft: '20px', listStyleType: 'disc' }}>
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    Item Description: {quotation.projectType || 'End-to-End Platform Development'}
-                  </li>
-                  {duration && (
-                    <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                      Estimated Timeline: <strong>{duration}</strong>
-                    </li>
-                  )}
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    Total Fixed Investment Amount (Net): <strong>{quotation.currency} {Number(quotation.grandTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Payment Milestone Schedule */}
-              {quotation.paymentTerms ? (
-                <div style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '10px' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '3px' }}>Payment Milestone Schedule</div>
-                  <div style={{ marginBottom: '4px' }}>
-                    To ensure a smooth workflow and mutual commitment, the financial terms are structured around project milestones:
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: '20px', listStyleType: 'disc' }}>
-                    {(() => {
-                      const parts = quotation.paymentTerms.split(',').map((s: string) => s.trim()).filter(Boolean);
-                      const labels = ['Project Initiation Advance', 'Mid-Project Development', 'Final Delivery & Deployment'];
-                      const total = Number(quotation.grandTotal);
-                      return parts.map((pct: string, pi: number) => {
-                        const num = parseFloat(pct);
-                        const amt = isNaN(num) ? '' : `${quotation.currency} ${(total * num / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-                        return (
-                          <li key={pi} style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '4px' }}>
-                            <strong>{labels[pi] || `Milestone ${pi + 1}`} ({isNaN(num) ? pct : `${num}%`})</strong>
-                            {amt && (
-                              <ul style={{ paddingLeft: '18px', margin: '2px 0', listStyleType: 'circle' }}>
-                                <li>Amount: {amt}</li>
-                              </ul>
-                            )}
-                          </li>
-                        );
-                      });
-                    })()}
-                  </ul>
-                </div>
-              ) : null}
-
-              {/* Terms & Conditions */}
-              <div style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '10px' }}>
-                <div style={{ fontWeight: 700, marginBottom: '4px' }}>Terms &amp; Conditions</div>
-                <ul style={{ margin: 0, paddingLeft: '20px', listStyleType: 'disc' }}>
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    <strong>Scope Adjustments:</strong> Any feature requests or functional modifications outside this specified document will be assessed and billed separately as an addendum.
-                  </li>
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    <strong>Content Provision:</strong> The client will provide all initial course copy, branding assets, and media files.
-                  </li>
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    <strong>Validity:</strong> This quotation remains valid for 15 days from the date of issue.
-                  </li>
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    <strong>Intellectual Property:</strong> Upon receipt of full payment, all custom source codes and designs shall transfer to the Client's complete ownership.
-                  </li>
-                  <li style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '2px' }}>
-                    <strong>Warranty:</strong> A six (6) month post-launch warranty period. Bug fixes for implemented features resolved without additional charge.
-                  </li>
-                </ul>
-              </div>
-
-              {/* Closing & Signature */}
-              <div style={{ pageBreakInside: 'avoid', breakInside: 'avoid', marginBottom: '16px' }}>
-                <div>Warm regards,</div>
-                <div style={{ height: '48px', display: 'flex', alignItems: 'flex-end', marginTop: '4px' }}>
-                  <div style={{ fontStyle: 'italic', fontSize: '20px', fontFamily: 'cursive', color: '#1a202c' }}>Aqtab Zafar</div>
-                </div>
-                <div style={{ fontWeight: 700 }}>Aqtab Zafar</div>
-                <div>Director,</div>
-                <div>Devronic Technologies</div>
-              </div>
-
-              {/* Project Acceptance */}
-              <div style={{ pageBreakInside: 'avoid', breakInside: 'avoid', borderTop: '1px solid #a0aec0', paddingTop: '10px' }}>
-                <div style={{ fontWeight: 700, marginBottom: '4px' }}>Project Acceptance</div>
-                <div style={{ marginBottom: '4px' }}>
-                  I, the undersigned, accept the scope, deliverables, and payment milestones detailed in this quotation.
-                </div>
-                <ul style={{ margin: 0, paddingLeft: '20px', listStyleType: 'disc' }}>
-                  <li>Signature: <span style={{ display: 'inline-block', width: '160px', borderBottom: '1px solid #1a202c', marginLeft: '4px' }}>&nbsp;</span></li>
-                  <li>Date: <span style={{ display: 'inline-block', width: '140px', borderBottom: '1px solid #1a202c', marginLeft: '4px' }}>&nbsp;</span></li>
-                </ul>
-              </div>
-
+                      {!isNaN(pctNum) && (
+                        <div className="text-[11px] font-semibold text-blue-600 mt-0.5">
+                          {formatINR(amount)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         )}
+
+
+        {/* ─── 7. TERMS AND CONDITIONS ─── */}
+        <div className="py-4 border-t border-slate-200 text-xs print-avoid-break">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+            Terms &amp; Conditions
+          </h2>
+          {quotation.termsAndConditions ? (
+            <div className="text-slate-600 text-[11px] leading-relaxed whitespace-pre-line">
+              {quotation.termsAndConditions}
+            </div>
+          ) : (
+            <ul className="list-disc pl-4 space-y-1 text-slate-600 text-[11px]">
+              <li><strong>Validity:</strong> This quotation remains valid for {validUntilFormatted}.</li>
+              <li><strong>Scope Adjustments:</strong> Any work or features not specified in this document will be quoted separately.</li>
+              <li><strong>Payment Schedule:</strong> Invoices are payable according to the agreed milestone terms outlined above.</li>
+              <li><strong>Intellectual Property:</strong> Full ownership of custom source codes and deliverables transfers upon complete settlement of invoices.</li>
+              <li><strong>Confidentiality:</strong> Both parties agree to maintain strict confidentiality regarding project assets and specifications.</li>
+            </ul>
+          )}
+        </div>
+
+        {/* ─── 8. AUTHORIZATION & ACCEPTANCE SIGN-OFF ─── */}
+        <div className="pt-6 border-t border-slate-200 grid grid-cols-2 gap-10 text-xs print-avoid-break">
+          {/* Issuer Signature */}
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+              Authorized Signatory
+            </span>
+            <div className="font-bold text-slate-900">{org?.name || 'Quotiq Technologies'}</div>
+            <div className="h-14 border-b border-slate-300 flex items-end pb-1">
+              <span className="text-[11px] text-slate-400 italic">Official Signature &amp; Stamp</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">Date: {formattedDate}</div>
+          </div>
+
+          {/* Client Acceptance */}
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+              Client Acceptance
+            </span>
+            <div className="font-bold text-slate-900">{quotation.customer?.company || quotation.customer?.name || 'Client Representative'}</div>
+            <div className="h-14 border-b border-slate-300 flex items-end pb-1">
+              <span className="text-[11px] text-slate-400 italic">Signature &amp; Acceptance Date</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">I accept the terms and deliverables specified above.</div>
+          </div>
+        </div>
+
       </div>
     </div>
   );
 }
-

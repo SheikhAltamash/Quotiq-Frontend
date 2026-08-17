@@ -42,7 +42,9 @@ const compileTemplate = (inputs: {
   salaryPerMonth: number;
   joiningDate: string;
   department: string;
+  orgName?: string;
 }) => {
+  const companyName = inputs.orgName || 'our organization';
   const dateStr = inputs.joiningDate
     ? new Date(inputs.joiningDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : '[Joining Date]';
@@ -53,39 +55,39 @@ const compileTemplate = (inputs: {
   if (inputs.department === 'technical') {
     return `Dear ${inputs.candidateName || '[Candidate Name]'},
 
-We are absolutely thrilled to offer you the position of ${inputs.jobTitle || '[Job Title]'} in the Technical Division at Devronic Solutions. 
+We are thrilled to offer you the position of ${inputs.jobTitle || '[Job Title]'} in the Technical Division at ${companyName}.
 
-This offer is for a ${typeLabel} with a ${workplaceLabel} working arrangement. We are confident that your technical skills, architectural insights, and passion for programming will be of immense value to our engineering department.
+This offer is for a ${typeLabel} with a ${workplaceLabel} working arrangement. We are confident that your technical skills, problem-solving abilities, and expertise will be of immense value to our engineering department.
 
 Key terms of your engagement:
-1. Position & Scope: You will be joining as a ${inputs.jobTitle || '[Job Title]'}, reporting to the Director of Engineering. Your core duties will include application design, system integrations, testing, and collaborative sprints.
-2. Compensation: You will receive a monthly remuneration of ₹${salaryStr} (INR), subject to standard tax deductions.
+1. Position & Scope: You will be joining as a ${inputs.jobTitle || '[Job Title]'}, reporting to the Technical Lead / Engineering Manager. Your core duties will include system architecture, feature implementation, code quality, and collaborative development.
+2. Compensation: You will receive a monthly remuneration of ₹${salaryStr} (INR), subject to applicable statutory deductions.
 3. Commencement: Your scheduled joining date will be ${dateStr}.
-4. Workspace: Your assignment is designated as ${workplaceLabel}. For remote/hybrid modes, you are expected to maintain stable connectivity and join core team stands.
+4. Workspace: Your assignment is designated as ${workplaceLabel}.
 
-Please review the details and sign below to signify your acceptance of this offer. We look forward to building next-generation technology together.
+Please review the details and confirm your acceptance. We look forward to welcoming you to the team.
 
 Sincerely,
-Sheikh Altamash
-Director, Devronic Solutions`;
+Authorized Signatory
+${companyName}`;
   } else {
     return `Dear ${inputs.candidateName || '[Candidate Name]'},
 
-We are delighted to extend our official offer for the position of ${inputs.jobTitle || '[Job Title]'} in the Social Media & Marketing Division at Devronic Solutions.
+We are pleased to extend our official offer for the position of ${inputs.jobTitle || '[Job Title]'} at ${companyName}.
 
-This offer outlines the details of your ${typeLabel} with a ${workplaceLabel} mode of engagement. We believe that your creativity, digital communication expertise, and strategic thinking will play an integral role in building our brand voice.
+This offer outlines the terms of your ${typeLabel} with a ${workplaceLabel} mode of engagement. We believe that your creativity, communication skills, and initiative will contribute significantly to our goals.
 
 Key terms of your engagement:
-1. Position & Scope: You will be joining as a ${inputs.jobTitle || '[Job Title]'}, reporting to the Creative Director. Your core responsibilities include digital campaign planning, content calendar creation, user growth engagement, and analytics tracking.
+1. Position & Scope: You will be joining as a ${inputs.jobTitle || '[Job Title]'}, contributing to campaign planning, content strategy, user engagement, and project execution.
 2. Compensation: You will receive a monthly compensation of ₹${salaryStr} (INR), payable in regular monthly cycles.
 3. Commencement: Your scheduled joining date will be ${dateStr}.
-4. Workspace: Your role is designated as ${workplaceLabel}. You will collaborate closely with our creative content teams.
+4. Workspace: Your role is designated as ${workplaceLabel}.
 
-Please review this letter and confirm your acceptance by signing below. We are excited about the prospects of your creative contribution to our social media growth.
+Please review this letter and confirm your acceptance. We are excited about your future contributions to our team.
 
 Sincerely,
-Sheikh Altamash
-Director, Devronic Solutions`;
+Authorized Signatory
+${companyName}`;
   }
 };
 
@@ -168,10 +170,11 @@ export default function OfferBuilderPage() {
         salaryPerMonth: Number(salaryPerMonth) || 0,
         joiningDate,
         department,
+        orgName: org?.name,
       });
       setLetterContent(content);
     }
-  }, [candidateName, jobTitle, jobType, workplaceType, salaryPerMonth, joiningDate, department, isEditedManually]);
+  }, [candidateName, jobTitle, jobType, workplaceType, salaryPerMonth, joiningDate, department, isEditedManually, org?.name]);
 
   // Mutation for creating/updating
   const saveMutation = useMutation({
